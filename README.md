@@ -4,10 +4,10 @@ pynicolet is a lightweight Python library for reading legacy Nicolet EEG files a
 
 ## Features
 - Parse legacy Nicolet EEG file formats (amplifier/channel metadata, timestamps, and samples)
-- Export to NumPy arrays, pandas DataFrames, or MNE-compatible structures
+- Export to NumPy arrays
 - Basic support for annotations and event markers
 - Streamlined API for quick loading and inspection
-- Small and dependency-light core, optional extras for advanced workflows
+- Small and dependency-light core
 
 ## Installation
 Install from PyPI (when published):
@@ -16,7 +16,7 @@ pip install pynicolet
 ```
 Or install from source:
 ```
-git clone https://github.com/your-org/pynicolet.git
+git clone https://github.com/NathENSAE/pynicolet.git
 cd pynicolet
 pip install -e .
 ```
@@ -24,25 +24,16 @@ pip install -e .
 ## Quickstart
 Load a Nicolet file and convert to NumPy / pandas:
 ```python
-from pynicolet import Reader
+from pynicolet import NicoletReader
 
 # open file
-r = Reader.open("path/to/recording.dat")
+reader = NicoletReader(filename)
 
 # read header and channels info
-meta = r.metadata
-print(meta.channels)
+header = reader.read_header()
 
 # read raw samples as NumPy array (channels x samples)
-data = r.read_samples()
-
-# or get a pandas DataFrame (time-indexed)
-df = r.to_dataframe()
-```
-
-Convert to MNE Raw (if mne is installed):
-```python
-raw = r.to_mne_raw()  # returns mne.io.Raw object
+data = reader.read_data()
 ```
 
 ## Supported Inputs
@@ -51,11 +42,9 @@ raw = r.to_mne_raw()  # returns mne.io.Raw object
 Note: If your files differ, open an issue with sample metadata (not patient data) to help extend support.
 
 ## API Overview
-- Reader.open(path) -> Reader
-- Reader.metadata -> dict-like metadata (channels, sampling rate, start time)
-- Reader.read_samples(start=None, stop=None) -> numpy.ndarray
-- Reader.to_dataframe() -> pandas.DataFrame
-- Reader.to_mne_raw() -> mne.io.Raw (optional dependency)
+- NicoletReader(filename) -> NicoletReader
+- NicoletReader.read_header() -> dict-like metadata (channels, sampling rate, start time)
+- NicoletReader.read_data() -> NumPy array of raw samples
 
 See the docs/ directory for full API documentation and examples.
 
@@ -71,9 +60,6 @@ Run tests with pytest:
 pip install -r dev-requirements.txt
 pytest
 ```
-
-## License
-pynicolet is licensed under the MIT License. See LICENSE for details.
 
 ## Contact
 Project: pynicolet — for questions or help open an issue on the repository.
