@@ -54,12 +54,5 @@ Contributions are welcome. Please:
 - Add tests for new features
 - Follow existing code style and include changelog entries
 
-## Testing
-Run tests with pytest:
-```
-pip install -r dev-requirements.txt
-pytest
-```
-
 ## Contact
 Project: pynicolet — for questions or help open an issue on the repository.

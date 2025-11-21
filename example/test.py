@@ -17,7 +17,7 @@ def plot_downsampled(data, max_points=5000):
     plt.show()
 
 def main():
-    filename = r"E:\NAIST\data\IED only\Patient68_IS-V44-02_t4.e"
+    filename = r"./example/EEG_test_data.e"
     reader = NicoletReader(filename)
     
     header = reader.read_header()
