@@ -17,21 +17,48 @@ def plot_downsampled(data, max_points=5000):
     plt.show()
 
 def main():
-    filename = r"E:\NAIST\data\IED only\Patient68_IS-V44-02_t4.e"
+    filename = r"./example/EEG_test_data.e"
     reader = NicoletReader(filename)
     
     header = reader.read_header()
     print("Header Information:")
     for key, value in header.items():
+        if key == "events" and value:
+            print(f"{key}: Found {len(value)} calculated events")
+            for i, ev in enumerate(value[:10]):
+                print(f"  Event {i}: {ev}")
+            if len(value) > 10:
+                print("  ...")
+            continue
+            
+        if key == "raw_events" and value:
+            print(f"{key}: Found {len(value)} raw binary events")
+            continue
+            
+        if key == "dynamicPackets" and value:
+            ids = set(p.get("IDStr") for p in value)
+            print(f"dynamicPackets: Found {len(value)} packets. Unique IDs: {ids}")
+            continue
+
         # Truncate long lists for display
         if isinstance(value, list) and len(value) > 5:
             value = value[:5] + ["..."]
         print(f"{key}: {value}")
         
-    data = reader.read_data(chIdx=[1])
-    print(f"\nData shape: {data.shape}")
+    ch_to_read = 0
+    data = reader.read_data(chIdx=[ch_to_read])
+    print(f"\nData shape (pynicolet [samples x channels]): {data.shape}")
     
-    plot_downsampled(data.flatten())
+    events = reader.read_events()
+    print(f"Events read via read_events(): Found {len(events)} events")
+    if events:
+        print(f"  First event: {events[0]}")
+    
+    # Calculate stats for comparison (channel 0 in Python = channel 1 in MATLAB)
+    print(f"Channel {ch_to_read + 1} mean: {np.mean(data):.4f}")
+    print(f"Channel {ch_to_read + 1} std:  {np.std(data):.4f}")
+    
+    plot_downsampled(data.flatten()[:5000])
 
 
 if __name__ == "__main__":

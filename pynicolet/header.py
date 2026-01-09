@@ -137,12 +137,18 @@ def read_nervus_header(filename):
         dynamicPackets = []
 
         # --- Locate InfoChangeStream section ---
-        indexIdx = next(i for i, t in enumerate(Tags) if t['IDStr'] == 'InfoChangeStream')
-        offset = Index[Tags[indexIdx]['index']]['offset']
-        section_len = Index[Tags[indexIdx]['index']]['sectionL']
-        nrDynamicPackets = section_len // 48
+        info_change_tag = next((t for t in Tags if t['IDStr'] == 'InfoChangeStream'), None)
+        if info_change_tag is None:
+             logger.warning("No InfoChangeStream found in Tags. Dynamic packets might be missing.")
+             nrDynamicPackets = 0
+             offset = 0
+        else:
+            offset = Index[info_change_tag['index']]['offset']
+            section_len = Index[info_change_tag['index']]['sectionL']
+            nrDynamicPackets = section_len // 48
     
-        f.seek(offset, os.SEEK_SET)
+        if nrDynamicPackets > 0:
+            f.seek(offset, os.SEEK_SET)
 
         # --- Read packet headers (without actual data) ---
         for i in range(nrDynamicPackets):
@@ -371,10 +377,13 @@ def read_nervus_header(filename):
                 tsInfos.append(ts_info_list)
         elif ts_packets_type == "tag":
             ts_packet = ts_packets[0]
-            indexInstance = next(i for i in Index if i['sectionIdx'] == ts_packet['index'])
+            indexInstance = next((i for i in Index if i['sectionIdx'] == ts_packet['index']), None)
+            if indexInstance is None:
+                logger.error("TSGUID tag found but no corresponding entry in Main Index.")
+                return Tags, Index, Qi, dynamicPackets, info, tsInfos, []
             offset = indexInstance['offset']
 
-            f.seek(offset, 0)  # 0 == os.SEEK_SET
+            f.seek(offset, os.SEEK_SET)
 
             guidmixed = np.frombuffer(f.read(16), dtype=np.uint8)
 
@@ -497,4 +506,113 @@ def read_nervus_header(filename):
             seg['scale'] = [ch['dResolution'] for ch in ts_info_list]
             seg['sampleCount'] = max(np.array(segments[i_seg]['duration'] * np.array(seg['samplingRate']), dtype=int))
 
-    return Tags, Index, Qi, dynamicPackets, info, tsInfos, segments
+        # ---- EVENTS ----
+        events = read_nervus_header_events(f, Tags, Index)
+
+    return Tags, Index, Qi, dynamicPackets, info, tsInfos, segments, events
+
+def read_nervus_header_events(f, Tags, Index):
+    """
+    Get events from the section tagged 'Events'.
+    Translated from MATLAB code by Andrei Barborica.
+    """
+    DAYSECS = 86400.0
+    DATETIMEMINUSFACTOR = 2209161600
+
+    # Find sequence of events, that are stored in the section tagged 'Events'
+    # Check both 'tag' and 'IDStr' for 'Events'
+    events_tag = next((t for t in Tags if t['tag'] == 'Events' or t['IDStr'] == 'Events'), None)
+    if events_tag is None:
+        return []
+
+    idxSection = events_tag['index']
+    index_entry = next((i for i in Index if i['sectionIdx'] == idxSection), None)
+    if index_entry is None:
+        return []
+
+    offset = index_entry['offset']
+
+    # GUID for event packet header: {B799F680-72A4-11D3-93D3-00500400C148}
+    evtPktGUID = bytes([0x80, 0xF6, 0x99, 0xB7, 0xA4, 0x72, 0xD3, 0x11, 0x93, 0xD3, 0x00, 0x50, 0x04, 0x00, 0xC1, 0x48])
+    
+    HCEVENT_ANNOTATION = "{A5A95612-A7F8-11CF-831A-0800091B5BDA}"
+    HCEVENT_SEIZURE = "{A5A95646-A7F8-11CF-831A-0800091B5BDA}"
+    HCEVENT_FORMATCHANGE = "{08784382-C765-11D3-90CE-00104B6F4F70}"
+    HCEVENT_PHOTIC = "{6FF394DA-D1B8-46DA-B78F-866C67CF02AF}"
+    HCEVENT_POSTHYPERVENT = "{481DFC97-013C-4BC5-A203-871B0375A519}"
+    HCEVENT_REVIEWPROGRESS = "{725798BF-CD1C-4909-B793-6C7864C27AB7}"
+    HCEVENT_EXAMSTART = "{96315D79-5C24-4A65-B334-E31A95088D55}"
+    HCEVENT_HYPERVENTILATION = "{A5A95608-A7F8-11CF-831A-0800091B5BDA}"
+    HCEVENT_IMPEDANCE = "{A5A95617-A7F8-11CF-831A-0800091B5BDA}"
+
+    f.seek(offset, os.SEEK_SET)
+    eventMarkers = []
+    
+    while True:
+        pktGUID = f.read(16)
+        if len(pktGUID) < 16 or pktGUID != evtPktGUID:
+            break
+            
+        pktLen = struct.unpack('<Q', f.read(8))[0]
+        
+        f.seek(8, os.SEEK_CUR) # Skip eventID
+        evtDate = struct.unpack('<d', f.read(8))[0]
+        evtDateFraction = struct.unpack('<d', f.read(8))[0]
+        
+        evtPOSIXTime = evtDate * DAYSECS + evtDateFraction - DATETIMEMINUSFACTOR
+        dt = datetime(1970, 1, 1) + timedelta(seconds=evtPOSIXTime)
+        
+        duration = struct.unpack('<d', f.read(8))[0]
+        f.seek(48, os.SEEK_CUR)
+        
+        evtUser_raw = struct.unpack('<12H', f.read(24))
+        user = ''.join(chr(c) for c in evtUser_raw).rstrip('\x00').strip()
+        
+        evtTextLen = struct.unpack('<Q', f.read(8))[0]
+        evtGUID_raw = f.read(16)
+        # GUID formatting from MATLAB: sprintf('{%.2X%.2X%.2X%.2X-%.2X%.2X-%.2X%.2X-%.2X%.2X-%.2X%.2X%.2X%.2X%.2X%.2X}',evtGUID([4 3 2 1 6 5 8 7 9:16]));
+        g = evtGUID_raw
+        guid_str = "{{{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}".format(
+            g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]
+        )
+        
+        f.seek(16, os.SEEK_CUR) # Skip Reserved4 array
+        evtLabel_raw = struct.unpack('<32H', f.read(64))
+        label = ''.join(chr(c) for c in evtLabel_raw).split('\x00')[0].strip()
+        
+        marker = {
+            'dateOLE': evtDate,
+            'dateFraction': evtDateFraction,
+            'dateStr': dt.strftime('%d-%B-%Y %H:%M:%S.%f')[:-3],
+            'date': dt,
+            'duration': duration,
+            'user': user,
+            'GUID': guid_str,
+            'label': label,
+            'IDStr': 'UNKNOWN'
+        }
+        
+        mapping = {
+            HCEVENT_SEIZURE: 'Seizure',
+            HCEVENT_ANNOTATION: 'Annotation',
+            HCEVENT_FORMATCHANGE: 'Format change',
+            HCEVENT_PHOTIC: 'Photic',
+            HCEVENT_POSTHYPERVENT: 'Posthyperventilation',
+            HCEVENT_REVIEWPROGRESS: 'Review progress',
+            HCEVENT_EXAMSTART: 'Exam start',
+            HCEVENT_HYPERVENTILATION: 'Hyperventilation',
+            HCEVENT_IMPEDANCE: 'Impedance'
+        }
+        marker['IDStr'] = mapping.get(guid_str, 'UNKNOWN')
+        
+        if guid_str == HCEVENT_ANNOTATION and evtTextLen > 0:
+            f.seek(32, os.SEEK_CUR) # Skip Reserved5 array
+            evtAnnotation_raw = struct.unpack(f'<{evtTextLen}H', f.read(int(evtTextLen*2)))
+            marker['annotation'] = ''.join(chr(c) for c in evtAnnotation_raw).rstrip('\x00').strip()
+        
+        eventMarkers.append(marker)
+        
+        offset += pktLen
+        f.seek(offset, os.SEEK_SET)
+
+    return eventMarkers

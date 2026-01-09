@@ -22,17 +22,18 @@ pip install -e .
 ```
 
 ## Quickstart
-Load a Nicolet file and convert to NumPy / pandas:
+Load a Nicolet file and convert to NumPy:
 ```python
 from pynicolet import NicoletReader
 
 # open file
 reader = NicoletReader(filename)
 
-# read header and channels info
+# read header and channels info (optional, read_data does it automatically)
 header = reader.read_header()
 
-# read raw samples as NumPy array (channels x samples)
+# read raw samples as NumPy array (samples x channels)
+# defaults to first segment and all matching channels
 data = reader.read_data()
 ```
 
@@ -42,9 +43,13 @@ data = reader.read_data()
 Note: If your files differ, open an issue with sample metadata (not patient data) to help extend support.
 
 ## API Overview
-- NicoletReader(filename) -> NicoletReader
-- NicoletReader.read_header() -> dict-like metadata (channels, sampling rate, start time)
-- NicoletReader.read_data() -> NumPy array of raw samples
+- `NicoletReader(filename)` -> `NicoletReader`
+- `NicoletReader.read_header()` -> `dict` metadata (channels, sampling rate, segments)
+- `NicoletReader.read_data(segment=0, chIdx=None, range_=None)` -> `NumPy array` [samples, channels]
+  - `segment`: 0-based index of the recording segment.
+  - `chIdx`: List of 0-based channel indices.
+  - `range_`: `[start, end]` 1-based sample range (inclusive).
+- `NicoletReader.read_events()` -> `list` of event dictionaries [sample, type, value]
 
 See the docs/ directory for full API documentation and examples.
 
@@ -53,13 +58,6 @@ Contributions are welcome. Please:
 - Open issues for bugs or feature requests
 - Add tests for new features
 - Follow existing code style and include changelog entries
-
-## Testing
-Run tests with pytest:
-```
-pip install -r dev-requirements.txt
-pytest
-```
 
 ## Contact
 Project: pynicolet — for questions or help open an issue on the repository.

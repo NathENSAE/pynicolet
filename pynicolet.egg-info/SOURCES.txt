@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+pynicolet/__init__.py
+pynicolet/data.py
+pynicolet/events.py
+pynicolet/header.py
+pynicolet/reader.py
+pynicolet.egg-info/PKG-INFO
+pynicolet.egg-info/SOURCES.txt
+pynicolet.egg-info/dependency_links.txt
+pynicolet.egg-info/requires.txt
+pynicolet.egg-info/top_level.txt

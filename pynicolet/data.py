@@ -10,11 +10,11 @@ def read_nervus_data(nrvHdr, segment=0, range_=None, chIdx=None):
     nrvHdr : dict or object
         Header returned by read_nervus_header
     segment : int
-        Segment number in the file to read from (1-based)
+        Segment number in the file to read from (0-based)
     range_ : list[int]
-        [startIndex, endIndex] range of samples (1-based)
+        [startIndex, endIndex] range of samples (1-based, inclusive)
     chIdx : list[int]
-        List of channel indices (1-based)
+        List of channel indices (0-based)
 
     Returns
     -------
@@ -26,14 +26,16 @@ def read_nervus_data(nrvHdr, segment=0, range_=None, chIdx=None):
     if nrvHdr is None:
         raise ValueError("Missing argument nrvHdr")
 
+    if segment < 0 or segment >= len(nrvHdr["Segments"]):
+        raise ValueError(f"Segment index {segment} out of range (0-{len(nrvHdr['Segments'])-1})")
+
     if range_ is None:
-        range_ = [1, nrvHdr["targetSampleCount"]]
+        range_ = [1, nrvHdr["Segments"][segment]["sampleCount"]]
     if chIdx is None:
         chIdx = np.array(nrvHdr["matchingChannels"], dtype=int)
 
     assert len(range_) == 2, "Range must be [firstIndex, lastIndex]"
     assert range_[0] > 0, "Range must start at 1 or higher"
-    assert np.isscalar(segment), "Segment must be a single value"
 
     # --- Cumulative sum of segment durations
     cSumSegments = np.concatenate(([0], np.cumsum([s["duration"] for s in nrvHdr["Segments"]]))).tolist()
