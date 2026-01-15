@@ -1,4 +1,4 @@
-# nicoletpy/io.py
+# pynicolet/header.py
 import os
 import logging
 import struct
@@ -10,6 +10,19 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 def read_nervus_header(filename):
+    """
+    Reads the header information from a Nicolet .e file.
+    
+    Parameters
+    ----------
+    filename : str
+        Path to the .e file.
+        
+    Returns
+    -------
+    tuple
+        (Tags, Index, Qi, dynamicPackets, info, tsInfos, segments, events) containing parsed header data.
+    """
     # --- Check file extension ---
     folder, name = os.path.split(filename)
     base, ext = os.path.splitext(filename)
@@ -98,9 +111,10 @@ def read_nervus_header(filename):
 
         """
         Parse the main Index from a Nicolet .e file.
-        Equivalent of the MATLAB 'Get Main Index' block.
         """
-        Index = []
+        # Create a list to collect chunks of index data, then concatenate
+        index_chunks = []
+        
         cur_idx = 0
         next_index_pointer = indexIdx
         cur_idx2 = 1
@@ -109,29 +123,45 @@ def read_nervus_header(filename):
 
             f.seek(next_index_pointer)
             nr_idx = struct.unpack("<Q", f.read(8))[0]  # uint64
-            var = np.frombuffer(f.read(8 * 3 * nr_idx), dtype="<u8")  # 3 * uint64 values
+            
+            # Read all 3 * nr_idx uint64s at once
+            var = np.frombuffer(f.read(8 * 3 * nr_idx), dtype="<u8")
+            var = var.reshape(-1, 3)
 
-            for i in range(nr_idx):
-                sectionIdx = int(var[3 * i])
-                offset = int(var[3 * i + 1])
-                var3 = int(var[3 * i + 2])
-                blockL = var3 % (2 ** 32)
-                sectionL = round(var3 / (2 ** 32))
+            # Vectorized calculation
+            sectionIdx = var[:, 0]
+            offset = var[:, 1]
+            var3 = var[:, 2]
+            
+            # Modulo and integer division using bitwise operators for speed on integers
+            blockL = var3 & 0xFFFFFFFF
+            sectionL = var3 >> 32
 
-                Index.append({
-                    "sectionIdx": sectionIdx,
-                    "offset": offset,
-                    "blockL": blockL,
-                    "sectionL": sectionL
-                })
+            # Create a structured array for this chunk
+            chunk = np.empty(len(var), dtype=[
+                ('sectionIdx', 'u8'), 
+                ('offset', 'u8'), 
+                ('blockL', 'u8'), 
+                ('sectionL', 'u8')
+            ])
+            chunk['sectionIdx'] = sectionIdx
+            chunk['offset'] = offset
+            chunk['blockL'] = blockL
+            chunk['sectionL'] = sectionL
+            
+            index_chunks.append(chunk)
 
             next_index_pointer = struct.unpack("<Q", f.read(8))[0]
             cur_idx += nr_idx
             cur_idx2 += 1
+            
+        if index_chunks:
+            Index = np.concatenate(index_chunks)
+        else:
+            Index = np.empty(0, dtype=[('sectionIdx', 'u8'), ('offset', 'u8'), ('blockL', 'u8'), ('sectionL', 'u8')])
 
         
         """
-        Translate of MATLAB 'READ DYNAMIC PACKETS' section.
         Reads and parses dynamic packet headers and data from a Nicolet .e file.
         """
         dynamicPackets = []
@@ -145,7 +175,7 @@ def read_nervus_header(filename):
         else:
             offset = Index[info_change_tag['index']]['offset']
             section_len = Index[info_change_tag['index']]['sectionL']
-            nrDynamicPackets = section_len // 48
+            nrDynamicPackets = int(section_len // 48)
     
         if nrDynamicPackets > 0:
             f.seek(offset, os.SEEK_SET)
@@ -155,7 +185,7 @@ def read_nervus_header(filename):
             packet_offset = offset + (i + 1) * 48
 
             guidmixed = np.frombuffer(f.read(16), dtype=np.uint8)
-            # MATLAB indexing pattern translated to Python:
+            # Reorder GUID bytes
             reorder = [3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15]
             guidnonmixed = guidmixed[reorder]
 
@@ -201,6 +231,11 @@ def read_nervus_header(filename):
 
         # --- Read actual data for each packet ---
         for dp in dynamicPackets:
+            # DEBUG: Inspect EVENTTYPEINFOGUID
+            if dp.get("IDStr") == "EVENTTYPEINFOGUID":
+                print(f"DEBUG: Found EVENTTYPEINFOGUID packet. Size: {dp['packetSize']}")
+                # We will read data below, but let's flag it for inspection after reading
+
             # Find tag corresponding to this GUID.
             # Tag formatting in the header may differ in case, braces or hyphens from the
             # GUID string we build here, so normalize both sides before comparing.
@@ -230,16 +265,19 @@ def read_nervus_header(filename):
                 # leave dp['data'] empty and continue
                 continue
 
-            # Get matching index segments
-            indexInstances = [ix for ix in Index if ix['sectionIdx'] == infoIdx]
+            # Get matching index segments using vectorized filtering on structured array
+            if len(Index) > 0:
+                indexInstances = Index[Index['sectionIdx'] == infoIdx]
+            else:
+                indexInstances = []
 
             internalOffset = 0
             remainingData = dp['packetSize']
             currentTargetStart = dp['internalOffsetStart']
 
             for currentInstance in indexInstances:
-                sectionL = currentInstance['sectionL']
-                offset = currentInstance['offset']
+                sectionL = int(currentInstance['sectionL'])
+                offset = int(currentInstance['offset'])
 
                 if internalOffset <= currentTargetStart < (internalOffset + sectionL):
                     startAt = currentTargetStart
@@ -256,6 +294,17 @@ def read_nervus_header(filename):
 
                 internalOffset += sectionL
 
+            if dp.get("IDStr") == "EVENTTYPEINFOGUID" and len(dp['data']) > 0:
+                print("DEBUG: Dumping EVENTTYPEINFOGUID content (first 512 bytes):")
+                data_preview = dp['data'][:512]
+                print(data_preview.hex())
+                # Try decoding as utf-16le to see strings
+                try:
+                    text = data_preview.decode('utf-16le', errors='ignore')
+                    print(f"DEBUG: As Text: {text}")
+                except:
+                    pass
+
         # Define property names
         info_props = [
             'patientID', 'firstName', 'middleName', 'lastName',
@@ -270,7 +319,13 @@ def read_nervus_header(filename):
         info_idx_struct = next((t for t in Tags if t['IDStr'] == 'PATIENTINFOGUID'), None)
         if info_idx_struct:
             info_idx = info_idx_struct['index']
-            index_instance = next((i for i in Index if i['sectionIdx'] == info_idx), None)
+            # Access structured array directly
+            matching_indices = Index[Index['sectionIdx'] == info_idx]
+            if len(matching_indices) == 0:
+                index_instance = None
+            else:
+                index_instance = matching_indices[0]
+
             if index_instance is None:
                 return None
 
@@ -305,8 +360,8 @@ def read_nervus_header(filename):
             for i in range(0, len(str_setup), 2):
                 id_val = str_setup[i]
                 strlen = str_setup[i + 1]
-                raw_str = f.read(strlen * 2 + 2)  # +2 like MATLAB reading strSetup(i+1)+1
-                # Decode UTF-16LE string (since MATLAB fread(...,'uint16') reads UTF-16 code units)
+                raw_str = f.read(strlen * 2 + 2)  # +2 padding
+                # Decode UTF-16LE string
                 value = raw_str.decode('utf-16le').rstrip('\x00').strip()
                 if id_val - 1 < len(info_props):
                     info[info_props[id_val - 1]] = value
@@ -377,11 +432,13 @@ def read_nervus_header(filename):
                 tsInfos.append(ts_info_list)
         elif ts_packets_type == "tag":
             ts_packet = ts_packets[0]
-            indexInstance = next((i for i in Index if i['sectionIdx'] == ts_packet['index']), None)
+            matching_indices = Index[Index['sectionIdx'] == ts_packet['index']]
+            indexInstance = matching_indices[0] if len(matching_indices) > 0 else None
+
             if indexInstance is None:
                 logger.error("TSGUID tag found but no corresponding entry in Main Index.")
                 return Tags, Index, Qi, dynamicPackets, info, tsInfos, []
-            offset = indexInstance['offset']
+            offset = int(matching_indices[0]['offset']) if len(matching_indices) > 0 else 0 
 
             f.seek(offset, os.SEEK_SET)
 
@@ -469,10 +526,10 @@ def read_nervus_header(filename):
             return Tags, Index, Qi, dynamicPackets, info, tsInfos, []
 
         segment_idx = seg_tag['index']
-        segment_instance = next(i for i in Index if i['sectionIdx'] == segment_idx)
+        segment_instance = Index[Index['sectionIdx'] == segment_idx][0]
 
         nr_segments = int(segment_instance['sectionL'] / 152)
-        f.seek(segment_instance['offset'], os.SEEK_SET)
+        f.seek(int(segment_instance['offset']), os.SEEK_SET)
 
         segments = []
         for _ in range(nr_segments):
@@ -514,7 +571,6 @@ def read_nervus_header(filename):
 def read_nervus_header_events(f, Tags, Index):
     """
     Get events from the section tagged 'Events'.
-    Translated from MATLAB code by Andrei Barborica.
     """
     DAYSECS = 86400.0
     DATETIMEMINUSFACTOR = 2209161600
@@ -526,11 +582,16 @@ def read_nervus_header_events(f, Tags, Index):
         return []
 
     idxSection = events_tag['index']
-    index_entry = next((i for i in Index if i['sectionIdx'] == idxSection), None)
+    matching = Index[Index['sectionIdx'] == idxSection]
+    if len(matching) == 0:
+        index_entry = None
+    else:
+        index_entry = matching[0]
+
     if index_entry is None:
         return []
 
-    offset = index_entry['offset']
+    offset = int(index_entry['offset'])
 
     # GUID for event packet header: {B799F680-72A4-11D3-93D3-00500400C148}
     evtPktGUID = bytes([0x80, 0xF6, 0x99, 0xB7, 0xA4, 0x72, 0xD3, 0x11, 0x93, 0xD3, 0x00, 0x50, 0x04, 0x00, 0xC1, 0x48])
@@ -570,15 +631,15 @@ def read_nervus_header_events(f, Tags, Index):
         
         evtTextLen = struct.unpack('<Q', f.read(8))[0]
         evtGUID_raw = f.read(16)
-        # GUID formatting from MATLAB: sprintf('{%.2X%.2X%.2X%.2X-%.2X%.2X-%.2X%.2X-%.2X%.2X-%.2X%.2X%.2X%.2X%.2X%.2X}',evtGUID([4 3 2 1 6 5 8 7 9:16]));
+        # GUID formatting
         g = evtGUID_raw
         guid_str = "{{{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}".format(
             g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]
         )
         
         f.seek(16, os.SEEK_CUR) # Skip Reserved4 array
-        evtLabel_raw = struct.unpack('<32H', f.read(64))
-        label = ''.join(chr(c) for c in evtLabel_raw).split('\x00')[0].strip()
+        evtLabel_bytes = f.read(64)
+        label = evtLabel_bytes.decode('utf-16le').partition('\x00')[0].strip()
         
         marker = {
             'dateOLE': evtDate,
@@ -605,10 +666,11 @@ def read_nervus_header_events(f, Tags, Index):
         }
         marker['IDStr'] = mapping.get(guid_str, 'UNKNOWN')
         
-        if guid_str == HCEVENT_ANNOTATION and evtTextLen > 0:
+        if evtTextLen > 0:
             f.seek(32, os.SEEK_CUR) # Skip Reserved5 array
-            evtAnnotation_raw = struct.unpack(f'<{evtTextLen}H', f.read(int(evtTextLen*2)))
-            marker['annotation'] = ''.join(chr(c) for c in evtAnnotation_raw).rstrip('\x00').strip()
+            # Read variable length annotation text
+            annotation_bytes = f.read(int(evtTextLen * 2))
+            marker['annotation'] = annotation_bytes.decode('utf-16le').partition('\x00')[0].strip()
         
         eventMarkers.append(marker)
         

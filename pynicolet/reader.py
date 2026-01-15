@@ -5,12 +5,25 @@ from collections import Counter
 from pynicolet.events import get_events
 
 class NicoletReader:
+    """
+    Main class for reading Nicolet .e files.
+    
+    Provides high-level access to header information, signal data, and events.
+    """
     def __init__(self, filename):
         self.filename = filename
         self.header = {}
         self.data = None
 
     def read_header(self):
+        """
+        Parses the file header and caches the result.
+        
+        Returns
+        -------
+        dict
+            Dictionary containing all header information.
+        """
         result = read_nervus_header(self.filename)
         if result is None:
             raise ValueError(f"read_nervus_header returned None for file: {self.filename}")
@@ -36,7 +49,7 @@ class NicoletReader:
         self.header["Segments"] = segments
         self.header["raw_events"] = raw_events
         
-        # Compute the most common sampling rate without scipy
+        # Compute the most common sampling rate
         samplerates = self.header["Segments"][0]["samplingRate"]
         if samplerates:
             self.header["targetSamplingRate"] = Counter(samplerates).most_common(1)[0][0]
@@ -50,8 +63,7 @@ class NicoletReader:
         # Get the first matching channel and count how many there are
         self.header["targetNumberOfChannels"] = len(self.header["matchingChannels"])
         
-        # targetSampleCount should represent the count in the current segment or total?
-        # Let's keep total for reference but read_data will handle segments.
+        # Calculate target sample count
         totalSampleCount = 0
         for segment in self.header["Segments"]:
             totalSampleCount += segment["sampleCount"]
@@ -61,7 +73,10 @@ class NicoletReader:
         if self.header["Segments"]:
             self.header["targetSampleCount"] = self.header["Segments"][0]["sampleCount"]
 
-        self.header["allIndexIDs"] = [entry["sectionIdx"] for entry in self.header["MainIndex"]]
+        if len(self.header["MainIndex"]) > 0:
+            self.header["allIndexIDs"] = self.header["MainIndex"]["sectionIdx"]
+        else:
+             self.header["allIndexIDs"] = np.array([], dtype=np.uint64)
         
         # Calculate event sample positions and add boundaries
         self.header["events"] = get_events(self.header)
@@ -72,8 +87,19 @@ class NicoletReader:
         """
         Read data for specified segment and channels.
         
-        chIdx: list of 0-based channel indices. If None, uses matchingChannels.
-        range_: [start, end] 1-based sample range. If None, reads whole segment.
+        Parameters
+        ----------
+        segment : int, optional
+            Segment index to read from (default is 0).
+        chIdx : list of int, optional
+            List of 0-based channel indices to read. If None, uses all matching channels.
+        range_ : list of [start, end], optional
+            1-based sample range [start, end] (inclusive) to read. If None, reads the whole segment.
+            
+        Returns
+        -------
+        np.ndarray
+            Data array of shape [n_samples, n_channels].
         """
         if not self.header:
             self.read_header()

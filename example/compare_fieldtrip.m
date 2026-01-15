@@ -17,6 +17,9 @@ hdr = ft_read_header(filename);
 disp('FieldTrip Header Information:');
 disp(hdr);
 
+evt = ft_read_event(filename);
+disp(evt(2).type);
+
 % 2. Read Data
 chan_idx = 1;
 data = ft_read_data(filename, 'chanindx', chan_idx);

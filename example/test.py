@@ -46,6 +46,7 @@ def main():
         print(f"{key}: {value}")
         
     ch_to_read = 0
+    # Only read the specific channel to save memory and time
     data = reader.read_data(chIdx=[ch_to_read])
     print(f"\nData shape (pynicolet [samples x channels]): {data.shape}")
     
