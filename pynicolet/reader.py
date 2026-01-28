@@ -83,7 +83,7 @@ class NicoletReader:
 
         return self.header
 
-    def read_data(self, segment=0, chIdx=None, range_=None):
+    def read_data(self, segment=0, chIdx=None, range_=None, verbose=False):
         """
         Read data for specified segment and channels.
         
@@ -95,6 +95,8 @@ class NicoletReader:
             List of 0-based channel indices to read. If None, uses all matching channels.
         range_ : list of [start, end], optional
             1-based sample range [start, end] (inclusive) to read. If None, reads the whole segment.
+        verbose : bool, optional
+            If True, show a progress bar. Default is False.
             
         Returns
         -------
@@ -107,7 +109,7 @@ class NicoletReader:
         if chIdx is None:
             chIdx = self.header["matchingChannels"]
             
-        self.data = read_nervus_data(self.header, segment=segment, range_=range_, chIdx=chIdx)
+        self.data = read_nervus_data(self.header, segment=segment, range_=range_, chIdx=chIdx, verbose=verbose)
         return self.data
 
     def read_events(self):

@@ -1,7 +1,7 @@
 import numpy as np
 import tqdm
 
-def read_nervus_data(nrvHdr, segment=0, range_=None, chIdx=None):
+def read_nervus_data(nrvHdr, segment=0, range_=None, chIdx=None, verbose=False):
     """
     Read data from Nicolet .e file.
     Optimized for sequential reading to minimize disk seeking.
@@ -16,6 +16,8 @@ def read_nervus_data(nrvHdr, segment=0, range_=None, chIdx=None):
         [startIndex, endIndex] range of samples (1-based, inclusive)
     chIdx : list[int]
         List of channel indices (0-based)
+    verbose : bool
+        If True, show a progress bar. Default is False.
 
     Returns
     -------
@@ -172,7 +174,8 @@ def read_nervus_data(nrvHdr, segment=0, range_=None, chIdx=None):
     # --- Execute Reads ---
     with open(nrvHdr["filename"], "rb") as h:
         # Use a progress bar for the actual I/O
-        for offset, count, ch_out_idx, out_idx, mult in tqdm.tqdm(read_tasks, desc="Reading data chunks", mininterval=0.5):
+        # Use a progress bar for the actual I/O
+        for offset, count, ch_out_idx, out_idx, mult in tqdm.tqdm(read_tasks, desc="Reading data chunks", mininterval=0.5, disable=not verbose):
             h.seek(offset)
             # Read 16-bit integers
             data = np.fromfile(h, dtype="<i2", count=count)

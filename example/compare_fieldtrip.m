@@ -1,39 +1,46 @@
 %% FieldTrip Comparison for pynicolet
-% This script loads the same Nicolet .e file using FieldTrip for validation.
-% Requires FieldTrip to be in your MATLAB path.
+% This script loads the entire Nicolet .e file using FieldTrip.
+% It measures the time taken to read ALL channels and ALL timepoints.
 
 %% ========================= SETUP ========================================
 clc;
 clear;
 close all;
-addpath('C:\Users\natha\AppData\Roaming\MathWorks\MATLAB Add-Ons\Collections\FieldTrip');
+
+% Ensure FieldTrip is initialized
 ft_defaults;
 
-filename = './EEG_test_data.e';
+filename = './example/EEG_test_data.e';
 
-% 1. Read Header fprintf('Reading header for: %s\n', filename);
+%% 1. Read Header 
+fprintf('Reading header for: %s\n', filename);
+
+tic; % Start timer for header
 hdr = ft_read_header(filename);
+headerTime = toc; 
+fprintf('Time to read header: %.4f seconds\n', headerTime);
 
 disp('FieldTrip Header Information:');
 disp(hdr);
 
-evt = ft_read_event(filename);
-disp(evt(2).type);
+% Optional: Read events if needed
+% evt = ft_read_event(filename);
 
-% 2. Read Data
-chan_idx = 1;
-data = ft_read_data(filename, 'chanindx', chan_idx);
+%% 2. Read ALL Data
+fprintf('\nReading ALL data (all channels, all timepoints)...\n');
 
-fprintf('\nData shape (FieldTrip [channels x samples]): [%d x %d]\n', size(data, 1), size(data, 2));
+tic; % Start timer for full data load
+% By default, calling ft_read_data without 'chanindx' reads everything
+data = ft_read_data(filename); 
+dataTime = toc; 
 
-% 3. Basic Stats for comparison
-fprintf('Channel %d mean: %.4f\n', chan_idx, mean(data(1,:)));
-fprintf('Channel %d std:  %.4f\n', chan_idx, std(data(1, :)));
+fprintf('Time to read ALL data: %.4f seconds\n', dataTime);
+fprintf('Data shape (FieldTrip [channels x samples]): [%d x %d]\n', size(data, 1), size(data, 2));
 
-% 4. Plot for visual check
-figure;
-plot(data(1, 1 : min(5000, end)));
-title(sprintf('FieldTrip: Channel %d (First 5000 samples)', chan_idx));
-xlabel('Samples');
-ylabel('Amplitude');
-grid on;
+%% 3. Basic Stats for comparison
+% Calculate stats across the entire matrix (or you can pick a specific channel to compare)
+global_mean = mean(data(:));
+global_std = std(data(:));
+
+fprintf('Global Matrix Mean: %.4f\n', global_mean);
+fprintf('Global Matrix Std:  %.4f\n', global_std);
